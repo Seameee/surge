@@ -17194,8 +17194,23 @@ _regenerate_proxy_configs() {
     
     local singbox_protocols=$(get_singbox_protocols)
     if [[ -n "$singbox_protocols" ]]; then
-        generate_singbox_config
-        svc restart vless-singbox 2>/dev/null
+        local sb_backup=""
+        if [[ -f "$CFG/singbox.json" ]]; then
+            sb_backup=$(mktemp --suffix=.json)
+            cp -a "$CFG/singbox.json" "$sb_backup"
+        fi
+        if generate_singbox_config; then
+            if /usr/local/bin/sing-box check -c "$CFG/singbox.json" >/dev/null 2>&1; then
+                svc restart vless-singbox 2>/dev/null
+            else
+                _err "Sing-box 配置校验失败，已回滚，未重启服务"
+                [[ -n "$sb_backup" ]] && cp -a "$sb_backup" "$CFG/singbox.json"
+            fi
+        else
+            _err "Sing-box 配置生成失败，已回滚，未重启服务"
+            [[ -n "$sb_backup" ]] && cp -a "$sb_backup" "$CFG/singbox.json"
+        fi
+        [[ -n "$sb_backup" ]] && rm -f "$sb_backup"
     fi
 }
 
