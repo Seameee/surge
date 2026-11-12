@@ -17164,6 +17164,22 @@ _del_routing_rule() {
 }
 
 # 重新生成代理配置的辅助函数
+# 用服务自身的环境变量跑 sing-box check，避免把「带环境变量才能过」的配置误判为失败
+# （典型如 sing-box 1.12+ 的 ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS）
+_singbox_check() {
+    local cfg="$1" envs=() line
+    if command -v systemctl >/dev/null 2>&1; then
+        while IFS= read -r line; do
+            [[ "$line" == *=* ]] && envs+=("$line")
+        done < <(systemctl show vless-singbox -p Environment --value 2>/dev/null | tr ' ' '\n')
+    fi
+    if (( ${#envs[@]} > 0 )); then
+        env "${envs[@]}" /usr/local/bin/sing-box check -c "$cfg" >/dev/null 2>&1
+    else
+        /usr/local/bin/sing-box check -c "$cfg" >/dev/null 2>&1
+    fi
+}
+
 _regenerate_proxy_configs() {
     local xray_protocols=$(get_xray_protocols)
     if [[ -n "$xray_protocols" ]]; then
@@ -17200,7 +17216,7 @@ _regenerate_proxy_configs() {
             cp -a "$CFG/singbox.json" "$sb_backup"
         fi
         if generate_singbox_config; then
-            if /usr/local/bin/sing-box check -c "$CFG/singbox.json" >/dev/null 2>&1; then
+            if _singbox_check "$CFG/singbox.json"; then
                 svc restart vless-singbox 2>/dev/null
             else
                 _err "Sing-box 配置校验失败，已回滚，未重启服务"
