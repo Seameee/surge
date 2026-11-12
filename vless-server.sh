@@ -4366,7 +4366,10 @@ gen_xray_user_routing_outbounds() {
 generate_xray_config() {
     local xray_protocols=$(get_xray_protocols)
     [[ -z "$xray_protocols" ]] && return 1
-    
+
+    # 先把历史遗留的无效 geosite 分类修正掉（幂等），避免直接生成非法配置
+    migrate_legacy_routing_rules
+
     mkdir -p "$CFG"
     
     # 确保日志目录存在
@@ -16713,6 +16716,36 @@ cleanup_legacy_access_restriction_rules() {
             (.domains // "") == "geosite:private-tracker"
         ))
     ) | not)]'
+}
+
+# 迁移：把历史版本写入的无效 geosite 分类替换为当前 geodata 中真实存在的分类
+# 旧版预设写 geosite:tracker（geosite.dat 里不存在），靠 generate_xray_config 末尾的
+# 「最终净化」把它整条删掉，导致规则静默失效、面板却仍显示已配置。
+# 现在不再静默删规则，改为在这里一次性修正，保证换新脚本后能无损自愈。
+migrate_legacy_routing_rules() {
+    [[ -f "$DB_FILE" ]] || return 0
+    local before
+    before=$(jq -c '[.routing_rules[]? | .domains // "" | select(test("geosite:(public-|private-)?tracker"))]' "$DB_FILE" 2>/dev/null)
+    [[ -z "$before" || "$before" == "[]" ]] && return 0
+
+    local newdom="geosite:category-pt,geosite:category-public-tracker"
+    _db_apply --arg nd "$newdom" '
+        .routing_rules = [
+            (.routing_rules // [])[] |
+            if ((.domains // "") | test("geosite:(public-|private-)?tracker"))
+            then .domains = (
+                ((.domains | split(",") | map(select(length > 0))) as $t
+                 | ($t | map(
+                     if (. == "geosite:tracker" or . == "geosite:public-tracker" or . == "geosite:private-tracker")
+                     then ($nd | split(",")) else [.] end
+                   ) | add | unique | join(",")))
+            )
+            else . end
+        ]' || return 1
+
+    _warn "已迁移历史 BT/PT 分流规则: ${before} -> ${newdom}"
+    _info "旧写法 geosite:(public-|private-)?tracker 在当前 geosite.dat 中不存在，规则此前从未真正生效"
+    return 0
 }
 
 disable_access_restriction() {
@@ -31358,6 +31391,14 @@ case "${1:-}" in
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] 同步失败" >&2
         exit 1
         ;;
+    --regenerate-config)
+        # 重新生成代理配置并按需重启（换脚本后迁移/排障用）
+        check_root
+        init_db
+        migrate_legacy_routing_rules
+        _regenerate_proxy_configs
+        exit $?
+        ;;
     --show-traffic)
         # 显示流量统计
         check_root
@@ -31437,6 +31478,7 @@ case "${1:-}" in
         echo "用法: $0 [选项]"
         echo ""
         echo "选项:"
+        echo "  --regenerate-config  重新生成代理配置并按需重启(换脚本后迁移/排障用)"
         echo "  --sync-traffic       同步流量数据到数据库 (用于定时任务)"
         echo "  --show-traffic       显示实时流量统计"
         echo "  --tg-bot-poll        处理 Telegram 用户机器人消息 (用于定时任务)"
