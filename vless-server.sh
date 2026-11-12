@@ -4926,30 +4926,13 @@ generate_xray_config() {
         return 1
     fi
 
-    # 最终净化 Xray 不支持的 tracker/geosite 规则（仅影响 Xray；Sing-box 保留对应限制）
-    if [[ -f "$CFG/config.json" ]]; then
-        local tmp=$(mktemp)
-        if jq '
-            if .routing and .routing.rules then
-                .routing.rules = [
-                    .routing.rules[] |
-                    select(
-                        (.domain == null) or
-                        (
-                            (.domain | index("geosite:tracker")) == null and
-                            (.domain | index("geosite:public-tracker")) == null and
-                            (.domain | index("geosite:private-tracker")) == null and
-                            (.domain | index("geosite:category-pt")) == null
-                        )
-                    )
-                ]
-            else . end
-        ' "$CFG/config.json" > "$tmp" 2>/dev/null; then
-            mv "$tmp" "$CFG/config.json"
-        else
-            rm -f "$tmp"
-        fi
-    fi
+    # 说明：这里原本有一段「最终净化」，会把含 geosite:tracker / geosite:public-tracker /
+    # geosite:private-tracker / geosite:category-pt 的规则整条静默删除。
+    # 实测 geosite.dat 中 category-pt、category-public-tracker 是存在的合法分类，
+    # 而 tracker/public-tracker/private-tracker 才不存在 —— 旧逻辑既删了合法规则，
+    # 又让面板里那条无效规则看起来「已配置」，导致用户完全无法察觉。
+    # 现在改为不猜测：生成后由 _regenerate_proxy_configs 调用 xray run -test 实测校验，
+    # 不通过就报错并回滚，而不是静默改写配置。
     
     # 验证最终配置文件的 JSON 格式
     if ! jq empty "$CFG/config.json" 2>/dev/null; then
@@ -16165,13 +16148,19 @@ gen_xray_routing_rules() {
         elif [[ -n "$domains" ]]; then
             # 检测是否是 geosite 规则
             if [[ "$domains" == geosite:* ]]; then
-                # 添加 domain 规则
-                if [[ -n "$ip_family_cidr" ]]; then
-                    result=$(echo "$result" | jq --arg geosite "$domains" --arg tag "$tag" --arg key "$tag_key" --arg ip "$ip_family_cidr" \
-                        '. + [{"type": "field", "domain": [$geosite], "ip": [$ip], ($key): $tag}]')
-                else
-                    result=$(echo "$result" | jq --arg geosite "$domains" --arg tag "$tag" --arg key "$tag_key" \
-                        '. + [{"type": "field", "domain": [$geosite], ($key): $tag}]')
+                # 支持逗号分隔的多个 geosite 分类
+                # 例：geosite:category-pt,geosite:category-public-tracker
+                # （旧实现只接受单个 geosite 标签，多分类会被当成一个非法 code 传给 Xray）
+                local geosite_array
+                geosite_array=$(echo "$domains" | tr ',' '\n' | grep -v '^$' | jq -R . 2>/dev/null | jq -s . 2>/dev/null)
+                if [[ -n "$geosite_array" && "$geosite_array" != "[]" && "$geosite_array" != "null" ]] && echo "$geosite_array" | jq empty 2>/dev/null; then
+                    if [[ -n "$ip_family_cidr" ]]; then
+                        result=$(echo "$result" | jq --argjson sites "$geosite_array" --arg tag "$tag" --arg key "$tag_key" --arg ip "$ip_family_cidr" \
+                            '. + [{"type": "field", "domain": $sites, "ip": [$ip], ($key): $tag}]')
+                    else
+                        result=$(echo "$result" | jq --argjson sites "$geosite_array" --arg tag "$tag" --arg key "$tag_key" \
+                            '. + [{"type": "field", "domain": $sites, ($key): $tag}]')
+                    fi
                 fi
                 
                 # 检查是否有对应的 geoip 规则需要添加（拆成独立规则，OR 关系）
@@ -16662,9 +16651,15 @@ test_routing() {
     return 0
 }
 
-# 访问限制预设（最小可用集）
+# 访问限制预设（基于 geosite/geoip 规则集，随 geodata 更新自动生效，无需手工维护域名列表）
+# 注意：geosite 分类必须是 geosite.dat 中真实存在的 code。实测（2026-10 版 geosite.dat）：
+#   存在：category-pt、category-public-tracker、cn、geolocation-cn、category-ads-all
+#   不存在：tracker、public-tracker、private-tracker、category-private-tracker
+# 旧版本用的 geosite:tracker 就是后者，写进配置会让 xray 直接启动失败。
 ACCESS_RESTRICT_CN_DOMAINS="geosite:cn,geoip:cn"
-ACCESS_RESTRICT_BTPT_DOMAINS="geosite:tracker"
+ACCESS_RESTRICT_BTPT_DOMAINS="geosite:category-pt,geosite:category-public-tracker"
+# 历史版本的 BT/PT 写法（仅用于识别与清理旧数据）
+ACCESS_RESTRICT_BTPT_LEGACY_DOMAINS="geosite:tracker,geosite:public-tracker,geosite:private-tracker"
 
 access_restriction_enabled() {
     [[ ! -f "$DB_FILE" ]] && return 1
@@ -16784,7 +16779,8 @@ enable_access_restriction() {
     _line
     echo -e "  ${D}将写入以下预设拦截规则:${NC}"
     echo -e "  • geosite:cn / geoip:cn -> block"
-    echo -e "  • geosite:tracker -> block"
+    echo -e "  • ${ACCESS_RESTRICT_BTPT_DOMAINS} -> block"
+    echo -e "  ${D}（以上均为 geosite/geoip 规则集，随 geodata 更新自动维护，无需手写域名）${NC}"
     echo ""
     read -rp "  确认启用? [Y/n]: " confirm
     [[ "$confirm" =~ ^[nN]$ ]] && return 0
@@ -16813,14 +16809,15 @@ for r in d.get('routing_rules',[]):
         break
 p.write_text(json.dumps(d,ensure_ascii=False,indent=2))
 PY2
-    db_add_routing_rule "custom" "block" "geosite:tracker" "as_is"
-    python3 - "$DB_FILE" <<'PY2'
+    db_add_routing_rule "custom" "block" "$ACCESS_RESTRICT_BTPT_DOMAINS" "as_is"
+    python3 - "$DB_FILE" "$ACCESS_RESTRICT_BTPT_DOMAINS" <<'PY2'
 import json,sys
 from pathlib import Path
 p=Path(sys.argv[1])
+target=sys.argv[2]
 d=json.loads(p.read_text())
 for r in d.get('routing_rules',[]):
-    if r.get('domains')=='geosite:tracker' and r.get('outbound')=='block':
+    if r.get('domains')==target and r.get('outbound')=='block':
         r['id']='restrict-btpt-tracker'
         break
 p.write_text(json.dumps(d,ensure_ascii=False,indent=2))
@@ -17130,8 +17127,29 @@ _del_routing_rule() {
 _regenerate_proxy_configs() {
     local xray_protocols=$(get_xray_protocols)
     if [[ -n "$xray_protocols" ]]; then
-        generate_xray_config
-        svc restart vless-reality 2>/dev/null
+        # 先备一份可用配置，生成/校验失败时回滚，避免把节点搞挂
+        local backup=""
+        if [[ -f "$CFG/config.json" ]]; then
+            backup=$(mktemp --suffix=.json)
+            cp -a "$CFG/config.json" "$backup"
+        fi
+        if generate_xray_config; then
+            local test_out=""
+            # 关键：重启前必须实测校验（xray 靠扩展名识别格式，临时文件需 .json 后缀）
+            if test_out=$(/usr/local/bin/xray run -test -c "$CFG/config.json" 2>&1); then
+                svc restart vless-reality 2>/dev/null
+            else
+                _err "Xray 配置校验失败，已回滚，未重启服务（节点保持原状）"
+                echo "$test_out" | grep -iE 'failed|error|invalid' | tail -3 | while IFS= read -r line; do
+                    echo -e "    ${D}${line}${NC}"
+                done
+                [[ -n "$backup" ]] && cp -a "$backup" "$CFG/config.json"
+            fi
+        else
+            _err "Xray 配置生成失败，已回滚，未重启服务"
+            [[ -n "$backup" ]] && cp -a "$backup" "$CFG/config.json"
+        fi
+        [[ -n "$backup" ]] && rm -f "$backup"
     fi
     
     local singbox_protocols=$(get_singbox_protocols)
