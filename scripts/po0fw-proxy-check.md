@@ -6,7 +6,7 @@ Surge 的 JavaScript API 支持 `$httpClient.head({url, policy, timeout}, callba
 
 ## 如何在 Surge 中设置
 
-安装或更新 [po0fw.sgmodule](https://raw.githubusercontent.com/mozisen/surge/refs/heads/main/scripts/po0fw.sgmodule)，打开 **模块 → 编辑参数**：
+安装或更新 [po0fw.sgmodule](https://raw.githubusercontent.com/Seameee/surge/refs/heads/main/scripts/po0fw.sgmodule)，打开 **模块 → 编辑参数**：
 
 | 参数 | 示例 | 说明 |
 | --- | --- | --- |

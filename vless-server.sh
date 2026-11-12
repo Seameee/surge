@@ -30,15 +30,16 @@ fi
 #  
 #  
 #  作者: Zyx0rx
-#  项目地址: https://github.com/mozisen
+#  项目地址: https://github.com/mozisen/surge （上游，作者 Zyx0rx）
+#  本仓库为个人维护 fork: https://github.com/Seameee/surge
 #  作者地址:https://docs.vaiox.de/
 #═══════════════════════════════════════════════════════════════════════════════
 
 readonly VERSION="3.7.5"
 readonly AUTHOR="Zyx0rx"
-readonly REPO_URL="https://github.com/mozisen/surge"
-readonly SCRIPT_REPO="mozisen/surge"
-readonly SCRIPT_SOURCE_REPO="mozisen/surge"
+readonly REPO_URL="https://github.com/Seameee/surge"
+readonly SCRIPT_REPO="Seameee/surge"
+readonly SCRIPT_SOURCE_REPO="Seameee/surge"
 SCRIPT_SOURCE_REF="${VLESS_SCRIPT_SOURCE_REF:-main}"
 if [[ ! "$SCRIPT_SOURCE_REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
     echo "错误: VLESS_SCRIPT_SOURCE_REF 格式无效" >&2
@@ -2667,6 +2668,7 @@ _download_singbox_stats_core() {
     version=$(_singbox_stats_build_version "$version") || return 1
     [[ "$arch" == amd64 || "$arch" == arm64 ]] || { _err "无此架构预编译包，请在本地从官方源码编译带 with_v2ray_api 的核心"; return 1; }
     libc=$(_singbox_stats_libc) || { _err "无法识别 libc，请手动确认或本地编译统计核心"; return 1; }
+    # 注意：预编译统计内核仍从上游发布分支下载（本 fork 没有 singbox-stats-binaries 分支）
     base="https://raw.githubusercontent.com/mozisen/surge/singbox-stats-binaries/v${version}/linux-${arch}-${libc}"
     if ! curl -fsSL --connect-timeout 15 --max-time 60 "$base/manifest.json" -o "$work/manifest.json"; then
         _err "无法下载 v$version linux/$arch/$libc 统计包。请检查网络；若无对应包，可本地编译带 with_v2ray_api 的核心（需充足内存/磁盘），不会自动编译。原核心保留。"

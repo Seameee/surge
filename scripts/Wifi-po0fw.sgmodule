@@ -11,8 +11,8 @@
 po0fw-slots = title="Po0槽位面板", content="点击刷新查询", style=info, script-name=po0fw-slots, update-interval=60
 
 [Script]
-WiFi-模块切换 = type=event,event-name=network-changed,script-path=https://raw.githubusercontent.com/mozisen/surge/main/scripts/wifi-module-switch.js,script-update-interval=3600,argument="{{{wifi_list}}}"
+WiFi-模块切换 = type=event,event-name=network-changed,script-path=https://raw.githubusercontent.com/Seameee/surge/main/scripts/wifi-module-switch.js,script-update-interval=3600,argument="{{{wifi_list}}}"
 
-WiFi-启动检查 = type=event,event-name=engine-started,script-path=https://raw.githubusercontent.com/mozisen/surge/main/scripts/wifi-module-switch.js,script-update-interval=3600,argument="{{{wifi_list}}}"
+WiFi-启动检查 = type=event,event-name=engine-started,script-path=https://raw.githubusercontent.com/Seameee/surge/main/scripts/wifi-module-switch.js,script-update-interval=3600,argument="{{{wifi_list}}}"
 
-po0fw-slots = type=generic,script-path=https://raw.githubusercontent.com/mozisen/surge/main/scripts/po0fw-panel.js,script-update-interval=3600,timeout=15,argument="token={{{TOKEN}}}&fixed_names={{{fixed_names}}}&fifo_names={{{fifo_names}}}"
+po0fw-slots = type=generic,script-path=https://raw.githubusercontent.com/Seameee/surge/main/scripts/po0fw-panel.js,script-update-interval=3600,timeout=15,argument="token={{{TOKEN}}}&fixed_names={{{fixed_names}}}&fifo_names={{{fifo_names}}}"
