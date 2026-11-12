@@ -16306,13 +16306,18 @@ gen_singbox_routing_rules() {
             # 检测是否是 geosite 规则
             if [[ "$domains" == geosite:* ]]; then
                 # Sing-box 使用 rule_set 格式，需要引用 geosite 规则集
-                local geosite_name="${domains#geosite:}"
-                if [[ -n "$ip_family_cidr" ]]; then
-                    result=$(echo "$result" | jq --arg geosite "$geosite_name" --arg tag "$tag" --arg ip "$ip_family_cidr" \
-                        '. + [{"rule_set": ["geosite-\($geosite)"], "ip_cidr": [$ip], "outbound": $tag}]')
-                else
-                    result=$(echo "$result" | jq --arg geosite "$geosite_name" --arg tag "$tag" \
-                        '. + [{"rule_set": ["geosite-\($geosite)"], "outbound": $tag}]')
+                # 支持逗号分隔的多个分类：geosite:category-pt,geosite:category-public-tracker
+                # -> rule_set: ["geosite-category-pt", "geosite-category-public-tracker"]
+                local geosite_sets
+                geosite_sets=$(echo "$domains" | tr ',' '\n' | grep -v '^$' | sed 's/^geosite:/geosite-/' | jq -R . 2>/dev/null | jq -s . 2>/dev/null)
+                if [[ -n "$geosite_sets" && "$geosite_sets" != "[]" && "$geosite_sets" != "null" ]] && echo "$geosite_sets" | jq empty 2>/dev/null; then
+                    if [[ -n "$ip_family_cidr" ]]; then
+                        result=$(echo "$result" | jq --argjson sets "$geosite_sets" --arg tag "$tag" --arg ip "$ip_family_cidr" \
+                            '. + [{"rule_set": $sets, "ip_cidr": [$ip], "outbound": $tag}]')
+                    else
+                        result=$(echo "$result" | jq --argjson sets "$geosite_sets" --arg tag "$tag" \
+                            '. + [{"rule_set": $sets, "outbound": $tag}]')
+                    fi
                 fi
             elif [[ "$domains" =~ ^geoip:[^,]+(,geoip:[^,]+)*$ ]]; then
                 # geoip 规则转换为对应 rule_set
